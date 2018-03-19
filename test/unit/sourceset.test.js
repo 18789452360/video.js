@@ -14,7 +14,6 @@ const sourceOne = {src: 'http://example.com/one.mp4', type: 'video/mp4'};
 const sourceTwo = {src: 'http://example.com/two.mp4', type: 'video/mp4'};
 const sourceThree = {src: 'http://example.com/three.mp4', type: 'video/mp4'};
 const flashSrc = {src: 'http://example.com/oceans.flv', type: 'video/flv'};
-const loadSource = {src: '', type: ''};
 
 if (!Html5.canOverrideAttributes()) {
   qunitFn = 'skip';
@@ -50,7 +49,7 @@ const validateSource = function(player, expectedSources, event, srcOverrides = {
   const currentSources = player.currentSources();
   const expected = srcOverrides.currentSources || expectedSources;
 
-  assert.deepEqual(expected.length, currentSources.length, 'same number of sources');
+  assert.equal(expected.length, currentSources.length, 'same number of sources');
 
   for (let i = 0; i < expected.length; i++) {
     assert.deepEqual(currentSources[i], expected[i], `currentSources ${i} is the same as we expect`);
@@ -585,6 +584,45 @@ QUnit[qunitFn]('sourceset', function(hooks) {
       });
 
       this.mediaEl.appendChild(source);
+      this.mediaEl.load();
+    });
+
+    QUnit.test('mediaEl.load() no attribute, two <source>', function(assert) {
+      const done = assert.async();
+
+      this.totalSourcesets = 2;
+      this.mediaEl.removeAttribute('src');
+
+      const elOne = document.createElement('source');
+      const elTwo = document.createElement('source');
+
+      elOne.src = this.sourceOne.src;
+      elOne.type = this.sourceOne.type;
+
+      elTwo.src = this.sourceTwo.src;
+      elTwo.type = this.sourceTwo.type;
+
+      // the only way to unset a source, so that we use the source
+      // elements instead
+      this.mediaEl.removeAttribute('src');
+
+      this.player.one('sourceset', (e1) => {
+        // we know the source here since there is only one
+        // source element, but the media element does not know it yet
+        validateSource(this.player, {src: '', type: ''}, e1);
+
+        // after loadstart we will have source set correctly
+        this.player.tech_.src = () => this.sourceOne.src;
+        this.player.trigger('loadstart');
+
+        // validate that the caches have updated
+        // el, and attr will not be up to date as this wasn't a real loadstart
+        validateSource(this.player, [this.sourceOne, this.sourceTwo], e1, {event: '', el: '', attr: ''});
+        done();
+      });
+
+      this.mediaEl.appendChild(elOne);
+      this.mediaEl.appendChild(elTwo);
       this.mediaEl.load();
     });
 
