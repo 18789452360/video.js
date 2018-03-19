@@ -104,21 +104,25 @@ const setupEnv = function(env, testName) {
 
   if (testName === 'change video el' || testName === 'change audio el') {
     Html5.prototype.movingMediaElementInDOM = false;
-    env.elHook = (player) => player.ready(() => {
-      env.mediaEl = player.tech_.el_;
-    });
-    videojs.hook('setup', env.elHook);
   }
 
   env.sourcesets = [];
   env.sourcesetHook = (player) => player.on('sourceset', (e) => env.sourcesets.push(e));
   videojs.hook('setup', env.sourcesetHook);
 
-  if ((/audio/i).test(testName)) {
+  if ((/video-js/i).test(testName)) {
+    env.mediaEl = document.createElement('video-js');
+  } else if ((/audio/i).test(testName)) {
     env.mediaEl = document.createElement('audio');
   } else {
     env.mediaEl = document.createElement('video');
   }
+
+  env.elHook = (player) => player.ready(() => {
+    env.mediaEl = player.tech_.el_;
+  });
+
+  videojs.hook('setup', env.elHook);
   env.testSrc = testSrc;
   env.sourceOne = sourceOne;
   env.sourceTwo = sourceTwo;
@@ -142,9 +146,7 @@ const setupAfterEach = function(totalSourcesets) {
       this.player.dispose();
       assert.equal(this.sourcesets.length, this.totalSourcesets, 'no source set on dispose');
 
-      if (this.elHook) {
-        videojs.removeHook('setup', this.elHook);
-      }
+      videojs.removeHook('setup', this.elHook);
       videojs.removeHook('setup', this.sourcesetHook);
 
       Html5.prototype.movingMediaElementInDOM = oldMovingMedia;
@@ -155,7 +157,7 @@ const setupAfterEach = function(totalSourcesets) {
   };
 };
 
-const testTypes = ['video el', 'change video el', 'audio el', 'change audio el'];
+const testTypes = ['video el', 'change video el', 'audio el', 'change audio el', 'video-js', 'change video el'];
 
 QUnit[qunitFn]('sourceset', function(hooks) {
   QUnit.module('source before player', (subhooks) => testTypes.forEach((testName) => {
