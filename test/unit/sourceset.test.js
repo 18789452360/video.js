@@ -21,7 +21,7 @@ if (!Html5.canOverrideAttributes()) {
 }
 
 const oldMovingMedia = Html5.prototype.movingMediaElementInDOM;
-const validateSource = function(player, expectedSources, event) {
+const validateSource = function(player, expectedSources, event, srcOverrides = {}) {
   if (!Array.isArray(expectedSources)) {
     expectedSources = [expectedSources];
   }
@@ -29,28 +29,73 @@ const validateSource = function(player, expectedSources, event) {
   const tech = player.tech_;
   const mediaEl = tech.el();
 
-  assert.deepEqual(player.currentSource(), expectedSources[0], 'currentSource is correct');
-  assert.equal(player.src(), expectedSources[0].src, 'src is correct');
-  assert.equal(event.src, expectedSources[0].src, 'event src is correct');
+  if (typeof srcOverrides.currentSource !== 'undefined') {
+    assert.deepEqual(player.currentSource(), srcOverrides.currentSource, 'currentSource is correct');
+  } else {
+    assert.deepEqual(player.currentSource(), expectedSources[0], 'currentSource is correct');
+  }
+
+  if (typeof srcOverrides.src !== 'undefined') {
+    assert.equal(player.src(), srcOverrides.src, 'src is correct');
+  } else {
+    assert.equal(player.src(), expectedSources[0].src, 'src is correct');
+  }
+
+  if (typeof srcOverrides.event !== 'undefined') {
+    assert.equal(event.src, srcOverrides.event, 'event src is correct');
+  } else {
+    assert.equal(event.src, expectedSources[0].src, 'event src is correct');
+  }
 
   const currentSources = player.currentSources();
+  const expected = srcOverrides.currentSources || expectedSources;
 
-  assert.deepEqual(expectedSources.length, currentSources.length, 'same number of sources');
+  assert.deepEqual(expected.length, currentSources.length, 'same number of sources');
 
-  for (let i = 0; i < expectedSources.length; i++) {
-    assert.deepEqual(currentSources[i], expectedSources[i], `currentSources ${i} is the same as we expect`);
+  for (let i = 0; i < expected.length; i++) {
+    assert.deepEqual(currentSources[i], expected[i], `currentSources ${i} is the same as we expect`);
   }
 
-  assert.equal(mediaEl.src, expectedSources[0].src, 'mediaEl.src is correct');
+  let attrSrc = expectedSources[0].src;
+  let techSrc = expectedSources[0].src;
+  let elSrc = expectedSources[0].src;
 
-  // if we do not have an attribute it will be null
-  // and that is valid if we expect the source to be an empty string
-  if (typeof mediaEl.getAttribute('src') !== 'string' && !expectedSources[0].src) {
-    assert.equal(mediaEl.getAttribute('src'), null, 'mediaEl attribute is correct');
+  if (typeof srcOverrides.attr !== 'undefined') {
+    attrSrc = srcOverrides.attr;
+  }
+
+  if (typeof srcOverrides.tech !== 'undefined') {
+    techSrc = srcOverrides.tech;
+  }
+
+  if (typeof srcOverrides.el !== 'undefined') {
+    elSrc = srcOverrides.el;
+  }
+
+  // if we expect a blank attr it will be null instead
+  if (!attrSrc) {
+    assert.notOk(mediaEl.getAttribute('src'), 'mediaEl attribute is correct');
   } else {
-    assert.equal(mediaEl.getAttribute('src'), expectedSources[0].src, 'mediaEl attribute is correct');
+    assert.equal(mediaEl.getAttribute('src'), attrSrc, 'mediaEl attribute is correct');
   }
-  assert.equal(tech.src(), expectedSources[0].src, 'tech is correct');
+
+  // tech source is always absolute, but can be empty string
+  // getAbsoluteURL would return the current url of the page for empty string
+  // so we have to check
+  if (!techSrc) {
+    assert.equal(mediaEl.src, techSrc, 'mediaEl.src is correct');
+  } else {
+    assert.equal(tech.src(), getAbsoluteURL(techSrc), 'tech is correct');
+  }
+
+  // mediaEl.src source is always absolute, but can be empty string
+  // getAbsoluteURL would return the current url of the page for empty string
+  // so we have to check
+  if (!elSrc) {
+    assert.equal(mediaEl.src, elSrc, 'mediaEl.src is correct');
+  } else {
+    assert.equal(mediaEl.src, getAbsoluteURL(elSrc), 'mediaEl.src is correct');
+  }
 };
 
 const setupEnv = function(env, testName) {
@@ -60,11 +105,15 @@ const setupEnv = function(env, testName) {
 
   if (testName === 'change video el' || testName === 'change audio el') {
     Html5.prototype.movingMediaElementInDOM = false;
+    env.elHook = (player) => player.ready(() => {
+      env.mediaEl = player.tech_.el_;
+    });
+    videojs.hook('setup', env.elHook);
   }
 
   env.sourcesets = [];
-  env.hook = (player) => player.on('sourceset', (e) => env.sourcesets.push(e));
-  videojs.hook('setup', env.hook);
+  env.sourcesetHook = (player) => player.on('sourceset', (e) => env.sourcesets.push(e));
+  videojs.hook('setup', env.sourcesetHook);
 
   if ((/audio/i).test(testName)) {
     env.mediaEl = document.createElement('audio');
@@ -94,7 +143,11 @@ const setupAfterEach = function(totalSourcesets) {
       this.player.dispose();
       assert.equal(this.sourcesets.length, this.totalSourcesets, 'no source set on dispose');
 
-      videojs.removeHook('setup', this.hook);
+      if (this.elHook) {
+        videojs.removeHook('setup', this.elHook);
+      }
+      videojs.removeHook('setup', this.sourcesetHook);
+
       Html5.prototype.movingMediaElementInDOM = oldMovingMedia;
       log.error.restore();
 
@@ -290,6 +343,51 @@ QUnit[qunitFn]('sourceset', function(hooks) {
         done();
       }, wait);
     });
+
+    QUnit.test('relative sources are handled correctly', function(assert) {
+      const done = assert.async();
+      const one = {src: 'relative-one.mp4', type: 'video/mp4'};
+      const two = {src: '../relative-two.mp4', type: 'video/mp4'};
+      const three = {src: './relative-three.mp4?test=test', type: 'video/mp4'};
+
+      const source = document.createElement('source');
+
+      source.src = one.src;
+      source.type = one.type;
+
+      this.mediaEl.appendChild(source);
+      this.player = videojs(this.mediaEl);
+
+      // mediaEl changes on ready
+      this.player.ready(() => {
+        this.mediaEl = this.player.tech_.el();
+      });
+
+      this.totalSourcesets = 3;
+      this.player.one('sourceset', (e) => {
+        assert.ok(true, '** sourceset with relative source and <source> el');
+        // mediaEl attr is relative
+        validateSource(this.player, {src: getAbsoluteURL(one.src), type: one.type}, e, {attr: one.src});
+
+        this.player.one('sourceset', (e2) => {
+          assert.ok(true, '** sourceset with relative source and mediaEl.src');
+          // mediaEl attr is relative
+          validateSource(this.player, {src: getAbsoluteURL(two.src), type: two.type}, e2, {attr: two.src});
+
+          // setAttribute makes the source absolute
+          this.player.one('sourceset', (e3) => {
+            assert.ok(true, '** sourceset with relative source and mediaEl.setAttribute');
+            validateSource(this.player, three, e3);
+            done();
+          });
+
+          this.mediaEl.setAttribute('src', three.src);
+        });
+
+        this.mediaEl.src = two.src;
+      });
+
+    });
   }));
 
   QUnit.module('source change', (subhooks) => testTypes.forEach((testName) => {
@@ -469,10 +567,14 @@ QUnit[qunitFn]('sourceset', function(hooks) {
       this.mediaEl.removeAttribute('src');
 
       this.player.one('sourceset', (e1) => {
-        validateSource(this.player, loadSource, e1);
+        // we know the source here since there is only one
+        // source element, but the media element does not know it yet
+        validateSource(this.player, sourceOne, e1, {tech: '', el: '', attr: ''});
 
         this.player.one('sourceset', (e2) => {
-          validateSource(this.player, loadSource, e2);
+          // we know the source here since there is only one
+          // source element
+          validateSource(this.player, sourceTwo, e2, {tech: '', el: '', attr: ''});
           done();
         });
 
@@ -494,10 +596,14 @@ QUnit[qunitFn]('sourceset', function(hooks) {
       source.type = this.sourceOne.type;
 
       this.player.one('sourceset', (e1) => {
-        validateSource(this.player, loadSource, e1);
+        // we know the source here since there is only one
+        // source element, but the media element does not know it yet
+        validateSource(this.player, sourceOne, e1, {tech: '', el: '', attr: ''});
 
         this.player.one('sourceset', (e2) => {
-          validateSource(this.player, loadSource, e2);
+          // we know the source here since there is only one
+          // source element, but the media element does not know it yet
+          validateSource(this.player, sourceTwo, e2, {tech: '', el: '', attr: ''});
           done();
         });
       });
@@ -562,25 +668,6 @@ QUnit[qunitFn]('sourceset', function(hooks) {
 
       this.mediaEl.src = badSource.src;
     });
-
-    /*
-    QUnit.test('relative source becomes absolute', function(assert) {
-      const done = assert.async();
-      const relativeSourceOne = {src: 'relative-one.mp4', type: 'video/mp4'};
-      const relativeSourceTwo = {src: './relative-two.mp4', type: 'video/mp4'};
-      const relativeSourceThree = {src: './relative-three.mp4?test=test', type: 'video/mp4'};
-
-      this.totalSourcesets = 2;
-
-      this.player.one('sourceset', (e) => {
-        relativeSourceOne.src = getAbsoluteURL(relativeSourceOne.src);
-        validateSource(this.player, relativeSourceOne, e);
-        done();
-      });
-
-      this.mediaEl.src = relativeSourceOne.src;
-    });
-    */
 
   }));
 
