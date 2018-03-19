@@ -626,6 +626,39 @@ QUnit[qunitFn]('sourceset', function(hooks) {
       this.mediaEl.load();
     });
 
+    QUnit.test('mediaEl.load() no attribute, two duplicate <source>', function(assert) {
+      const done = assert.async();
+
+      this.totalSourcesets = 2;
+      this.mediaEl.removeAttribute('src');
+
+      const elOne = document.createElement('source');
+      const elTwo = document.createElement('source');
+
+      elOne.src = this.sourceOne.src;
+      elOne.type = this.sourceOne.type;
+
+      elTwo.src = this.sourceOne.src;
+      elTwo.type = this.sourceOne.type;
+
+      // the only way to unset a source, so that we use the source
+      // elements instead
+      this.mediaEl.removeAttribute('src');
+
+      // since we only have one valid source, even though their are two elements
+      // this should show the correct source
+      this.player.one('sourceset', (e1) => {
+        // validate that the caches have updated
+        // el, and attr will not be up to date as this wasn't a real loadstart
+        validateSource(this.player, [this.sourceOne, this.sourceOne], e1, {tech: '', el: '', attr: ''});
+        done();
+      });
+
+      this.mediaEl.appendChild(elOne);
+      this.mediaEl.appendChild(elTwo);
+      this.mediaEl.load();
+    });
+
     QUnit.test('mediaEl.load() no attribute x2 at the same time', function(assert) {
       const done = assert.async();
       const source = document.createElement('source');

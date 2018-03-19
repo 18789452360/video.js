@@ -1197,7 +1197,6 @@ class Player extends Component {
    *
    */
   findMimeType_(src) {
-
     if (!src) {
       return '';
     }
@@ -1277,7 +1276,7 @@ class Player extends Component {
       sourceElSources.push(srcObj);
 
       if (srcObj.src && srcObj.src === src) {
-        matchingSourceEls.push(srcObj);
+        matchingSourceEls.push(srcObj.src);
       }
     }
 
